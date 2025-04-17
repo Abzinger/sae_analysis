@@ -2,6 +2,8 @@
 outfile*
 wandb/
 checkpoints/
+raw_latents/
+results/
 *.yml
 wandb_init.py
 test_micromamba.py
