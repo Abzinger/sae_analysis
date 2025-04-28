@@ -7,7 +7,8 @@ from pathlib import Path
 
 def create_rlz(run_cfg: RunConfig, 
                constructor_cfg: ConstructorConfig, 
-               sampler_cfg: SamplerConfig, 
+               sampler_cfg: SamplerConfig,
+               modules: list[str], 
                width: int,
                save_dir: Path):
     """
@@ -23,6 +24,7 @@ def create_rlz(run_cfg: RunConfig,
         run_cfg (RunConfig): The run configuration.
         constructor_cfg (ConstructorConfig): The constructor configuration.
         sampler_cfg (SamplerConfig): The sampler configuration.
+        modules (list[str]): The list of module (of transformer) to include.
         width (int): The width of the SAE or transcoder.
         save_dir (Path): The directory where the raw tokens and activations
             are saved.
@@ -31,18 +33,18 @@ def create_rlz(run_cfg: RunConfig,
         realization (tokens, activations) of the SAE or transcoder.
     """
     
-    print("loading Tokinzer")
+    print("loading Tokinzer...")
     tokenizer = AutoTokenizer.from_pretrained(run_cfg.model)
     
-    print("reading raw tokens activation as latent dataset")
+    print("reading raw tokens activation as latent datase...")
     latent_dataset = LatentDataset(
         raw_dir=save_dir,
         sampler_cfg=sampler_cfg,
         constructor_cfg=constructor_cfg,
         tokenizer=tokenizer,
-        modules=["transformer.h.1.mlp.act"]
+        modules=modules
         )
-    print("get coordinates&values for all latent dataset")
+    print("getting coordinates&values for all latent dataset...")
     for i in range(len(latent_dataset.buffers)):
         if i == 0:
             locations, activations, tokens = latent_dataset.buffers[i].load()
@@ -64,3 +66,7 @@ def create_rlz(run_cfg: RunConfig,
                                        (tokens_flat.shape[0], width, 2))
     return tkn_acts
 #^
+
+def create_pmf(rlz):
+    _,inverse,counts= torch.unique(rlz, dim=0, return_inverse=True, return_counts=True)
+    return counts[inverse]/(rlz.shape[0]*rlz.shape[1])
