@@ -3,6 +3,7 @@ from transformers import AutoTokenizer
 from delphi.delphi.config import RunConfig, ConstructorConfig, SamplerConfig
 from delphi.delphi.latents import LatentDataset
 from pathlib import Path
+from typing import Optional
 import json
 
 
@@ -104,8 +105,8 @@ def create_joint_rlz(run_cfg: RunConfig,
     print("padding activations...")
     _act = torch.nn.utils.rnn.pad_sequence(_act, batch_first=True, padding_value=-1)
     _act = _act[:-1]
-    rlz[:, :32] = _tok
-    rlz[:, 32:] = _act
+    rlz[:, :train_config["sae"]["k"]] = _tok
+    rlz[:, train_config["sae"]["k"]:] = _act
     
     print("saving the rlz tensor...")
     t_name = "rlz_" + name + ".pt"
@@ -114,31 +115,32 @@ def create_joint_rlz(run_cfg: RunConfig,
     return rlz
 #^
 
-def create_marginal_rlz(joint_rlz: torch.Tensor, neu_id: int = 0) -> torch.Tensor:
+def create_marginal_rlz(joint_rlz: torch.Tensor, m_rlz_inverse: torch.Tensor,
+                        neu_id: int) -> torch.Tensor:
     """
     Create a marginal realization tensor from the realization tensor.
     The marginal realization is computed by summing the values
     along the specified dimension.
     Args:
         joint_rlz (torch.Tensor): The realization tensor of shape (n_tokens, 2*top_k).
+        m_rlz_inverse (torch.Tensor): neurons indices in the joint realization tensor.
         neu_id (int): The dimension along which to compute the marginal.
+        width
     Returns:
         marginal_rlz (torch.Tensor): The marginal realization of shape (n_tokens, width).
     """
-    # compute a map of neuron idices in realization 
-    # (might move it outside this function)
-    _, m_rlz_inverse = torch.unique(joint_rlz[:, :32], sorted=True, return_inverse=True)
     # compute a mask of when neu_id-th neuron is active
     mask_neu = (m_rlz_inverse == neu_id)
-    # compute the activation values of the neu_id-th neuron
-    rlz_act = joint_rlz[:, 32:]
+    # Set the activation values of all neurons but neu_id to 0
+    k = joint_rlz.shape[1]//2
+    rlz_act = joint_rlz[:, k:]
     neu_inverse = torch.mul(rlz_act, mask_neu)
     # return a one dimensional tensor of the activation values 
     # (a neurons fires at most once per token)
     return torch.sum(neu_inverse, dim=1)
 
 
-def create_pmf(rlz: torch.Tensor, dim: int = 0) -> torch.Tensor:
+def create_pmf(rlz: torch.Tensor, dim: Optional[int] = None) -> torch.Tensor:
     """
     Create a probability mass function (PMF) from the realization tensor.
     The PMF is computed by normalizing the counts of unique values
@@ -152,3 +154,37 @@ def create_pmf(rlz: torch.Tensor, dim: int = 0) -> torch.Tensor:
     # compute the unique values and their counts
     _,inverse,counts= torch.unique(rlz, dim=dim, return_inverse=True, return_counts=True)
     return counts[inverse]/(rlz.shape[0])
+#^ 
+
+def compute_r(joint_rlz: torch.Tensor, width: int) -> int:
+    """
+    Compute the degree of redundnacy of the joint pmf.
+    The r value is computed by normalizing the sum of 
+    the entropies of the marginal pmfs by the joint pmf.
+    Args:
+        rlz (torch.Tensor): The realization tensor of shape (n_tokens, top_k).
+        width (int): The number of neurons of the sae.
+    Returns:
+        r (int): The degree of redundnacy r.
+    """
+    # compute the joint pmf
+    jnt_pmf = create_pmf(joint_rlz, dim=0)
+    # compute the joint entropy 
+    H_jnt = -(jnt_pmf * torch.log2(jnt_pmf)).sum()
+    # compute the marginal entropy per neuron 
+    s_H_mrg = 0 
+    # compute a map of neuron idices in realization 
+    k = joint_rlz.shape[1]//2
+    _, m_rlz_inverse = torch.unique(joint_rlz[:, :k], sorted=True, return_inverse=True)
+    for i in range(width):
+        # compute the marginal rlz per neuron
+        m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i)
+        # compute the marginal pmf per neuron
+        m_pmf = create_pmf(m_rlz)
+        # compute the marginal entropy per neuron
+        s_H_mrg += -(m_pmf * torch.log2(m_pmf)).sum()
+    #^ 
+    # compute the degree of redundancy r 
+    r = s_H_mrg / H_jnt
+    return r
+#^
