@@ -60,36 +60,53 @@ def create_joint_rlz(run_cfg: RunConfig,
             locations, activations, tokens = latent_dataset.buffers[i].load()
             tokens_flat = tokens.flatten() # might get rid of this
             t_coo = locations[:,0]*tokens.shape[1] + locations[:,1]
-            coo = torch.stack((t_coo, locations[:,2]), dim=0)
+            id_coo = torch.stack((t_coo, locations[:,2]), dim=0)
+            act_coo = torch.stack((t_coo, activations), dim=0)
         else:
             _locations, _activations, _ = latent_dataset.buffers[i].load()
             _t_coo = _locations[:,0]*tokens.shape[1] + _locations[:,1]
-            _coo = torch.stack((_t_coo, _locations[:,2]), dim=0)
-            coo = torch.cat((coo, _coo), dim=1)
-            activations = torch.cat((activations, _activations), dim=0)
+            _id_coo = torch.stack((_t_coo, _locations[:,2]), dim=0)
+            _act_coo = torch.stack((_t_coo, _activations), dim=0)
+            # _coo_check = _coo[:,:5]
+            # coo_shape = coo.shape 
+            # coo_check = coo[:,coo_shape[1]-5:coo_shape[1]] 
+            id_coo = torch.cat((id_coo, _id_coo), dim=1)
+            act_coo = torch.cat((act_coo, _act_coo), dim=1)
+            # c_coo_shape = coo.shape
+            # c_coo_check = coo[:,coo_shape[1]:coo_shape[1]+5]
+            # act_shape = activations.shape
+            # activations = torch.cat((activations, _activations), dim=0)
+            # c_act_shape = activations.shape
         #^
     #^ 
+    print("reorder the tokens coordinates...")
+    sort_idx = torch.argsort(id_coo[0,:])
+    id_coo = id_coo[:, sort_idx]
+    act_coo = act_coo[:, sort_idx]
+    
     print("getting unique tokens coordinates...")
-    _, counts = torch.unique(coo[0,:], return_counts=True)
+    _, counts = torch.unique(id_coo[0,:], return_counts=True)
+    
     print("filling the rlz tensor...")
     # comment: first neurons idices and then activations 
     lis_counts = counts.tolist()
     print("splitting tokens...")
-    _tok = torch.split(coo[1,:], lis_counts, dim=0)
+    _tok = torch.split(id_coo[1,:], lis_counts, dim=0)
     # make sure that the maximum length of the tokens is 32
-    _tok +=(-1*torch.ones((train_config["sae"]["k"],), dtype=coo[1,:].dtype),)
+    _tok +=(-1*torch.ones((train_config["sae"]["k"],), dtype=id_coo[1,:].dtype),)
     print("padding tokens...")
     _tok = torch.nn.utils.rnn.pad_sequence(_tok, batch_first=True, padding_value=-1)
     _tok = _tok[:-1]
     print("splitting activations...")
-    _act = torch.split(activations, lis_counts, dim=0)
+    _act = torch.split(act_coo[1,:], lis_counts, dim=0)
     # make sure that the maximum length of the activations is 32
-    _act +=(-1*torch.ones((train_config["sae"]["k"],), dtype=coo[1,:].dtype),)
+    _act +=(-1*torch.ones((train_config["sae"]["k"],), dtype=act_coo[1,:].dtype),)
     print("padding activations...")
     _act = torch.nn.utils.rnn.pad_sequence(_act, batch_first=True, padding_value=-1)
     _act = _act[:-1]
     rlz[:, :32] = _tok
     rlz[:, 32:] = _act
+    
     print("saving the rlz tensor...")
     t_name = "rlz_" + name + ".pt"
     torch.save(rlz, save_dir / t_name)
