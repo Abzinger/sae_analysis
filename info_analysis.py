@@ -114,6 +114,30 @@ def create_joint_rlz(run_cfg: RunConfig,
     return rlz
 #^
 
+def create_marginal_rlz(joint_rlz: torch.Tensor, neu_id: int = 0) -> torch.Tensor:
+    """
+    Create a marginal realization tensor from the realization tensor.
+    The marginal realization is computed by summing the values
+    along the specified dimension.
+    Args:
+        joint_rlz (torch.Tensor): The realization tensor of shape (n_tokens, 2*top_k).
+        neu_id (int): The dimension along which to compute the marginal.
+    Returns:
+        marginal_rlz (torch.Tensor): The marginal realization of shape (n_tokens, width).
+    """
+    # compute a map of neuron idices in realization 
+    # (might move it outside this function)
+    _, m_rlz_inverse = torch.unique(joint_rlz[:, :32], sorted=True, return_inverse=True)
+    # compute a mask of when neu_id-th neuron is active
+    mask_neu = (m_rlz_inverse == neu_id)
+    # compute the activation values of the neu_id-th neuron
+    rlz_act = joint_rlz[:, 32:]
+    neu_inverse = torch.mul(rlz_act, mask_neu)
+    # return a one dimensional tensor of the activation values 
+    # (a neurons fires at most once per token)
+    return torch.sum(neu_inverse, dim=1)
+
+
 def create_pmf(rlz: torch.Tensor, dim: int = 0) -> torch.Tensor:
     """
     Create a probability mass function (PMF) from the realization tensor.
