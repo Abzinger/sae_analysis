@@ -119,26 +119,28 @@ def create_marginal_rlz(joint_rlz: torch.Tensor, m_rlz_inverse: torch.Tensor,
                         neu_id: int) -> torch.Tensor:
     """
     Create a marginal realization tensor from the realization tensor.
-    The marginal realization is computed by summing the values
-    along the specified dimension.
+    The marginal realization is computed by masking the activation values 
+    of all neurons but the neu_id-th neuron.
     Args:
         joint_rlz (torch.Tensor): The realization tensor of shape (n_tokens, 2*top_k).
         m_rlz_inverse (torch.Tensor): neurons indices in the joint realization tensor.
-        neu_id (int): The dimension along which to compute the marginal.
-        width
+        neu_id (int): The dimension along which to compute the marginal (Note: due
+            to -1 padding it is ith-neuron + 1).
     Returns:
-        marginal_rlz (torch.Tensor): The marginal realization of shape (n_tokens, width).
+        marginal_rlz (torch.Tensor): The marginal realization of shape 
+        (n_tokens, 2*top_k).
     """
     # compute a mask of when neu_id-th neuron is active
     mask_neu = (m_rlz_inverse == neu_id)
-    # Set the activation values of all neurons but neu_id to 0
+    # Set the activation values of all neurons but neu_id to zeros
     k = joint_rlz.shape[1]//2
     rlz_act = joint_rlz[:, k:]
     neu_inverse = torch.mul(rlz_act, mask_neu)
     # return a one dimensional tensor of the activation values 
     # (a neurons fires at most once per token)
     return torch.sum(neu_inverse, dim=1)
-
+    #^
+#^
 
 def create_pmf(rlz: torch.Tensor, dim: Optional[int] = None) -> torch.Tensor:
     """
@@ -170,19 +172,21 @@ def compute_r(joint_rlz: torch.Tensor, width: int) -> int:
     # compute the joint pmf
     jnt_pmf = create_pmf(joint_rlz, dim=0)
     # compute the joint entropy 
-    H_jnt = -(jnt_pmf * torch.log2(jnt_pmf)).sum()
+    H_jnt = -(torch.log2(jnt_pmf)).mean()
     # compute the marginal entropy per neuron 
     s_H_mrg = 0 
     # compute a map of neuron idices in realization 
     k = joint_rlz.shape[1]//2
     _, m_rlz_inverse = torch.unique(joint_rlz[:, :k], sorted=True, return_inverse=True)
-    for i in range(width):
+    # range shifted by 1 due to -1 padding
+    for i in range(1, width+1):
         # compute the marginal rlz per neuron
-        m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i)
+        print(f"create marginal realization for neuron {i-1}...")
+        m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complement=False)
         # compute the marginal pmf per neuron
         m_pmf = create_pmf(m_rlz)
         # compute the marginal entropy per neuron
-        s_H_mrg += -(m_pmf * torch.log2(m_pmf)).sum()
+        s_H_mrg += -(torch.log2(m_pmf)).mean()
     #^ 
     # compute the degree of redundancy r 
     r = s_H_mrg / H_jnt
