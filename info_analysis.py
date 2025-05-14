@@ -183,7 +183,8 @@ def compute_r(joint_rlz: torch.Tensor, width: int) -> int:
     """
     Compute the degree of redundnacy of the joint pmf.
     The r value is computed by normalizing the sum of 
-    the entropies of the marginal pmfs by the joint pmf.
+    the marginal entropies of individual neurons by the 
+    joint pmf (sum_i H(X_i)/H(X_1,...,X_n)).
     Args:
         rlz (torch.Tensor): The realization tensor of shape (n_tokens, top_k).
         width (int): The number of neurons of the sae.
@@ -219,7 +220,9 @@ def compute_v(joint_rlz: torch.Tensor, width: int) -> int:
     """
     Compute the degree of vulnerability of the joint pmf.
     The v value is computed by normalizing the sum of 
-    the entropies of the conditional marginal pmfs by the joint pmf.
+    the conditional marginal entropies of individual 
+    neurons conditioned on the rest by the joint entropy 
+    (sum_i H(X_i|X_1,...,X_n)/H(X_1,...,X_n)).
     Args:
         rlz (torch.Tensor): The realization tensor of shape (n_tokens, top_k).
         width (int): The number of neurons of the sae.
@@ -239,14 +242,14 @@ def compute_v(joint_rlz: torch.Tensor, width: int) -> int:
     for i in range(1, width+1):
         # compute the marginal rlz per neuron
         print(f"create marginal realization for neuron {i-1}...")
-        c_m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complement=False)
+        c_m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complement=True)
         # compute the marginal pmf per neuron
-        c_m_pmf = create_pmf(c_m_rlz)
+        c_m_pmf = create_pmf(c_m_rlz, dim=0)
         # compute the conditional marginal entropy per neuron 
         # H(X_1|X_2,X_3) = H(X_1,X_2,X_3) - H(X_2,X_3)
         s_H_c_mrg += H_jnt + (torch.log2(c_m_pmf)).mean()
     #^ 
-    # compute the degree of redundancy r 
+    # compute the degree of redundancy v
     v = s_H_c_mrg / H_jnt
     return v
 #^
