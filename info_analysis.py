@@ -116,7 +116,7 @@ def create_joint_rlz(run_cfg: RunConfig,
 #^
 
 def create_marginal_rlz(joint_rlz: torch.Tensor, m_rlz_inverse: torch.Tensor,
-                        neu_id: int) -> torch.Tensor:
+                        neu_id: int, complementary: bool) -> torch.Tensor:
     """
     Create a marginal realization tensor from the realization tensor.
     The marginal realization is computed by masking the activation values 
@@ -126,19 +126,40 @@ def create_marginal_rlz(joint_rlz: torch.Tensor, m_rlz_inverse: torch.Tensor,
         m_rlz_inverse (torch.Tensor): neurons indices in the joint realization tensor.
         neu_id (int): The dimension along which to compute the marginal (Note: due
             to -1 padding it is ith-neuron + 1).
+        complementary (bool): If True, compute the complement marginal realization
+            (i.e. all neurons but neu_id-th neuron).
     Returns:
         marginal_rlz (torch.Tensor): The marginal realization of shape 
         (n_tokens, 2*top_k).
     """
+    rlz = torch.empty((joint_rlz.shape[0], joint_rlz.shape[1]))
+    k = joint_rlz.shape[1]//2
     # compute a mask of when neu_id-th neuron is active
     mask_neu = (m_rlz_inverse == neu_id)
-    # Set the activation values of all neurons but neu_id to zeros
-    k = joint_rlz.shape[1]//2
-    rlz_act = joint_rlz[:, k:]
-    neu_inverse = torch.mul(rlz_act, mask_neu)
-    # return a one dimensional tensor of the activation values 
-    # (a neurons fires at most once per token)
-    return torch.sum(neu_inverse, dim=1)
+    if complementary:
+        # set neu_id index to -1 and keep all other indices
+        rlz_idx = torch.mul(joint_rlz[:, :k], ~mask_neu)
+        mask_sub = torch.mul(mask_neu, -1)
+        rlz_idx = rlz_idx + mask_sub
+        # set activations of neu_id to -1 and keep all other activations
+        rlz_act = torch.mul(joint_rlz[:, k:], ~mask_neu)
+        rlz_act = rlz_act + mask_sub
+        # reorder the tensor to have the neu_id-th neuron at the end
+        srt_idx = torch.argsort(rlz_idx, dim=1)
+        # the correct way to reorder the tensor is to use torch.take_along_dim
+        torch.take_along_dim(rlz_idx, srt_idx, axis=1)
+        torch.take_along_dim(rlz_act, srt_idx, axis=1)
+        rlz[:, :k] = rlz_idx
+        rlz[:, k:] = rlz_act
+        return rlz
+    #^    
+    else:
+        # Set the activation values of all neurons but neu_id to zeros 
+        rlz_act = joint_rlz[:, k:]
+        neu_inverse = torch.mul(rlz_act, mask_neu)
+        # return a one dimensional tensor of the activation values 
+        # (a neurons fires at most once per token)
+        return torch.sum(neu_inverse, dim=1)
     #^
 #^
 
@@ -191,4 +212,41 @@ def compute_r(joint_rlz: torch.Tensor, width: int) -> int:
     # compute the degree of redundancy r 
     r = s_H_mrg / H_jnt
     return r
+#^
+
+
+def compute_v(joint_rlz: torch.Tensor, width: int) -> int:
+    """
+    Compute the degree of vulnerability of the joint pmf.
+    The v value is computed by normalizing the sum of 
+    the entropies of the conditional marginal pmfs by the joint pmf.
+    Args:
+        rlz (torch.Tensor): The realization tensor of shape (n_tokens, top_k).
+        width (int): The number of neurons of the sae.
+    Returns:
+        r (int): The degree of redundnacy r.
+    """
+    # compute the joint pmf
+    jnt_pmf = create_pmf(joint_rlz, dim=0)
+    # compute the joint entropy 
+    H_jnt = -(torch.log2(jnt_pmf)).mean()
+    # compute the marginal entropy per neuron 
+    s_H_c_mrg = 0 
+    # compute a map of neuron idices in realization 
+    k = joint_rlz.shape[1]//2
+    _, m_rlz_inverse = torch.unique(joint_rlz[:, :k], sorted=True, return_inverse=True)
+    # range shifted by 1 due to -1 padding
+    for i in range(1, width+1):
+        # compute the marginal rlz per neuron
+        print(f"create marginal realization for neuron {i-1}...")
+        c_m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complement=False)
+        # compute the marginal pmf per neuron
+        c_m_pmf = create_pmf(c_m_rlz)
+        # compute the conditional marginal entropy per neuron 
+        # H(X_1|X_2,X_3) = H(X_1,X_2,X_3) - H(X_2,X_3)
+        s_H_c_mrg += H_jnt + (torch.log2(c_m_pmf)).mean()
+    #^ 
+    # compute the degree of redundancy r 
+    v = s_H_c_mrg / H_jnt
+    return v
 #^
