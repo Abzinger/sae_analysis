@@ -179,55 +179,52 @@ def create_pmf(rlz: torch.Tensor, dim: Optional[int] = None) -> torch.Tensor:
     return counts[inverse]/(rlz.shape[0])
 #^ 
 
-def compute_r(joint_rlz: torch.Tensor, width: int) -> int:
+def compute_r(joint_rlz: torch.Tensor, width: int) -> float:
     """
     Compute the degree of redundnacy of the joint pmf.
-    The r value is computed by normalizing the sum of 
-    the marginal entropies of individual neurons by the 
-    joint pmf (sum_i H(X_i)/H(X_1,...,X_n)).
+    It is computed by normalizing the sum of the marginal 
+    entropies of individual neurons by the joint pmf 
+    ().
     Args:
         rlz (torch.Tensor): The realization tensor of shape (n_tokens, top_k).
         width (int): The number of neurons of the sae.
     Returns:
-        r (int): The degree of redundnacy r.
+        sum_i H(X_i)/H(X_1,...,X_n) (float): The degree of redundnacy r.
     """
     # compute the joint pmf
     jnt_pmf = create_pmf(joint_rlz, dim=0)
-    # compute the joint entropy 
+    # compute the joint entropy H(X_1,...,X_n)
     H_jnt = -(torch.log2(jnt_pmf)).mean()
-    # compute the marginal entropy per neuron 
+    # initialize sum_i H(X_i) 
     s_H_mrg = 0 
     # compute a map of neuron idices in realization 
     k = joint_rlz.shape[1]//2
     _, m_rlz_inverse = torch.unique(joint_rlz[:, :k], sorted=True, return_inverse=True)
-    # range shifted by 1 due to -1 padding
+    # compute sum_i H(X_i) (Note: range shifted by 1 due to -1 padding)
     for i in range(1, width+1):
         # compute the marginal rlz per neuron
-        print(f"create marginal realization for neuron {i-1}...")
         m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complement=False)
-        # compute the marginal pmf per neuron
+        # compute the marginal pmf p(X_i)
         m_pmf = create_pmf(m_rlz)
-        # compute the marginal entropy per neuron
+        # compute and add the marginal entropy H(X_i)
         s_H_mrg += -(torch.log2(m_pmf)).mean()
     #^ 
     # compute the degree of redundancy r 
-    r = s_H_mrg / H_jnt
-    return r
+    return s_H_mrg / H_jnt
 #^
 
 
-def compute_v(joint_rlz: torch.Tensor, width: int) -> int:
+def compute_v(joint_rlz: torch.Tensor, width: int) -> float:
     """
     Compute the degree of vulnerability of the joint pmf.
-    The v value is computed by normalizing the sum of 
-    the conditional marginal entropies of individual 
-    neurons conditioned on the rest by the joint entropy 
-    (sum_i H(X_i|X_1,...,X_n)/H(X_1,...,X_n)).
+    It is computed by normalizing the sum of the conditional 
+    marginal entropies of individual neurons conditioned on 
+    the rest by the joint entropy.
     Args:
         rlz (torch.Tensor): The realization tensor of shape (n_tokens, top_k).
         width (int): The number of neurons of the sae.
     Returns:
-        r (int): The degree of redundnacy r.
+        sum_i H(X_i|X_1,...,X_n)/H(X_1,...,X_n): The degree of vulnerability v.
     """
     # compute the joint pmf
     jnt_pmf = create_pmf(joint_rlz, dim=0)
@@ -238,18 +235,16 @@ def compute_v(joint_rlz: torch.Tensor, width: int) -> int:
     # compute a map of neuron idices in realization 
     k = joint_rlz.shape[1]//2
     _, m_rlz_inverse = torch.unique(joint_rlz[:, :k], sorted=True, return_inverse=True)
-    # range shifted by 1 due to -1 padding
+    # compute sum_i H(X_i|X_1,...,X_n) (Note: range shifted by 1 due to -1 padding)
     for i in range(1, width+1):
-        # compute the marginal rlz per neuron
-        print(f"create marginal realization for neuron {i-1}...")
+        # compute the complemnet marginal rlz per neuron
         c_m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complement=True)
-        # compute the marginal pmf per neuron
+        # compute the conditional marginal pmf p(X_i|X_1,...,X_n)
         c_m_pmf = create_pmf(c_m_rlz, dim=0)
         # compute the conditional marginal entropy per neuron 
-        # H(X_1|X_2,X_3) = H(X_1,X_2,X_3) - H(X_2,X_3)
+        # e.g. H(X_1|X_2,X_3) = H(X_1,X_2,X_3) - H(X_2,X_3)
         s_H_c_mrg += H_jnt + (torch.log2(c_m_pmf)).mean()
     #^ 
-    # compute the degree of redundancy v
-    v = s_H_c_mrg / H_jnt
-    return v
+    # return the degree of redundancy v
+    return s_H_c_mrg / H_jnt
 #^
