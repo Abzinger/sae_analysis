@@ -203,7 +203,7 @@ def compute_r(joint_rlz: torch.Tensor, width: int) -> float:
     # compute sum_i H(X_i) (Note: range shifted by 1 due to -1 padding)
     for i in range(1, width+1):
         # compute the marginal rlz per neuron
-        m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complement=False)
+        m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=False)
         # compute the marginal pmf p(X_i)
         m_pmf = create_pmf(m_rlz)
         # compute and add the marginal entropy H(X_i)
@@ -238,7 +238,7 @@ def compute_v(joint_rlz: torch.Tensor, width: int) -> float:
     # compute sum_i H(X_i|X_1,...,X_n) (Note: range shifted by 1 due to -1 padding)
     for i in range(1, width+1):
         # compute the complemnet marginal rlz per neuron
-        c_m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complement=True)
+        c_m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=True)
         # compute the conditional marginal pmf p(X_i|X_1,...,X_n)
         c_m_pmf = create_pmf(c_m_rlz, dim=0)
         # compute the conditional marginal entropy per neuron 
