@@ -248,3 +248,39 @@ def compute_v(joint_rlz: torch.Tensor, width: int) -> float:
     # return the degree of redundancy v
     return s_H_c_mrg / H_jnt
 #^
+
+def save_r(name: str, expansion_factor: int, r: float, save_dir: Path) -> None:
+    """
+    Save the results of the analysis to a file.
+    Args:
+        name (str): The name of the sae or transcoder to use.
+        expansion_factor (int): The expansion factor of the sae.
+        r (float): The degree of redundancy r.
+        save_dir (Path): The root directory where the results will be saved.
+    """
+    # create a dictionary of the results
+    results = {
+        "expansion_factor": expansion_factor,
+        "r": r
+    }
+    # check if redundancy.json file exists
+    if not (save_dir / "redundancy.json").exists():
+        # create the file and write the header
+        with open(save_dir / "redundancy.json", "w") as f:
+            json.dump({name: results }, f)
+    else:
+        # read the existing file and append the results
+        with open(save_dir / "redundancy.json", "r") as f:
+            data = json.load(f)
+            # check if the name already exists in the file
+            if name in data:
+                # update the existing entry
+                data[name].update(results)
+            else:
+                # add a new entry
+                data[name] = results
+        # write the updated data to the file
+        with open(save_dir / "redundancy.json", "w") as f:
+            json.dump(data, f)
+    #^
+#^ 
