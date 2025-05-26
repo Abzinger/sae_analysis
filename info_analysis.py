@@ -306,12 +306,18 @@ def save_r(name: str, train_config: dict, r: float, save_dir: Path) -> None:
         save_dir (Path): The root directory where the results will be saved.
     """
     # create a dictionary of the results
+    # convert r to a float if it is a tensor
+    if isinstance(r, torch.Tensor):
+        print("Converting r to a float...")
+        r = r.cpu().item()
     results = {
         "train_config": train_config,
         "r": r
     }
     # check if redundancy.json file exists
     if not (save_dir / "redundancy.json").exists():
+        # create the folder
+        save_dir.mkdir(parents=True, exist_ok=True)
         # create the file and write the header
         with open(save_dir / "redundancy.json", "w") as f:
             json.dump({name: results }, f)
