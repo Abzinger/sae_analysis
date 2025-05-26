@@ -5,6 +5,8 @@ from delphi.delphi.latents import LatentDataset
 from pathlib import Path
 from typing import Optional
 import json
+from multiprocessing import Pool#, cpu_count
+import os
 
 
 def create_joint_rlz(run_cfg: RunConfig, 
@@ -179,6 +181,23 @@ def create_pmf(rlz: torch.Tensor, dim: Optional[int] = None) -> torch.Tensor:
     return counts[inverse]/(rlz.shape[0])
 #^ 
 
+
+def compute_marginal_entropy(args):
+    """
+    Compute the marginal entropy of a neuron.
+    Args:
+        args (tuple): A tuple containing the neuron id, the joint realization
+            tensor, and the inverse mapping of the marginal realization.
+    Returns:
+        entropy (float): The marginal entropy of the neuron.
+    """
+    i, joint_rlz_np, m_rlz_inverse_np = args
+    joint_rlz = torch.from_numpy(joint_rlz_np)
+    m_rlz_inverse = torch.from_numpy(m_rlz_inverse_np)
+    m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=False)
+    m_pmf = create_pmf(m_rlz)
+    return -(torch.log2(m_pmf)).mean()
+#^
 def compute_r(joint_rlz: torch.Tensor, width: int) -> float:
     """
     Compute the degree of redundnacy of the joint pmf.
@@ -201,19 +220,37 @@ def compute_r(joint_rlz: torch.Tensor, width: int) -> float:
     k = joint_rlz.shape[1]//2
     _, m_rlz_inverse = torch.unique(joint_rlz[:, :k], sorted=True, return_inverse=True)
     # compute sum_i H(X_i) (Note: range shifted by 1 due to -1 padding)
-    for i in range(1, width+1):
-        # compute the marginal rlz per neuron
-        m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=False)
-        # compute the marginal pmf p(X_i)
-        m_pmf = create_pmf(m_rlz)
-        # compute and add the marginal entropy H(X_i)
-        s_H_mrg += -(torch.log2(m_pmf)).mean()
-    #^ 
+    cpu_count = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
+    # Convert tensors to numpy arrays to avoid multiprocessing deadlocks
+    joint_rlz_np = joint_rlz.cpu().numpy()
+    m_rlz_inverse_np = m_rlz_inverse.cpu().numpy()
+    with Pool(cpu_count) as pool:
+        args_list = [(i, joint_rlz_np, m_rlz_inverse_np) for i in range(1, width+1)]
+        results = pool.map(compute_marginal_entropy, args_list)
+        s_H_mrg = sum(results)
+    # for i in range(1, width+1):
+    #     # compute the marginal rlz per neuron
+    #     m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=False)
+    #     # compute the marginal pmf p(X_i)
+    #     m_pmf = create_pmf(m_rlz)
+    #     # compute and add the marginal entropy H(X_i)
+    #     s_H_mrg += -(torch.log2(m_pmf)).mean()
+    # #^ 
     # compute the degree of redundancy r 
     return s_H_mrg / H_jnt
 #^
 
-
+def compute_conditional_entropy(args):
+        i, joint_rlz, m_rlz_inverse, H_jnt = args
+        c_m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=True)
+        c_m_pmf = create_pmf(c_m_rlz, dim=0)
+        return H_jnt + (torch.log2(c_m_pmf)).mean()
+def compute_conditional_entropy_np(args):
+        i, joint_rlz_np, m_rlz_inverse_np, H_jnt_np = args
+        joint_rlz = torch.from_numpy(joint_rlz_np)
+        m_rlz_inverse = torch.from_numpy(m_rlz_inverse_np)
+        H_jnt = torch.from_numpy(H_jnt_np)
+        return compute_conditional_entropy((i, joint_rlz, m_rlz_inverse, H_jnt))
 def compute_v(joint_rlz: torch.Tensor, width: int) -> float:
     """
     Compute the degree of vulnerability of the joint pmf.
@@ -236,31 +273,41 @@ def compute_v(joint_rlz: torch.Tensor, width: int) -> float:
     k = joint_rlz.shape[1]//2
     _, m_rlz_inverse = torch.unique(joint_rlz[:, :k], sorted=True, return_inverse=True)
     # compute sum_i H(X_i|X_1,...,X_n) (Note: range shifted by 1 due to -1 padding)
-    for i in range(1, width+1):
-        # compute the complemnet marginal rlz per neuron
-        c_m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=True)
-        # compute the conditional marginal pmf p(X_i|X_1,...,X_n)
-        c_m_pmf = create_pmf(c_m_rlz, dim=0)
-        # compute the conditional marginal entropy per neuron 
-        # e.g. H(X_1|X_2,X_3) = H(X_1,X_2,X_3) - H(X_2,X_3)
-        s_H_c_mrg += H_jnt + (torch.log2(c_m_pmf)).mean()
-    #^ 
+    
+    cpu_count = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
+    joint_rlz_np = joint_rlz.cpu().numpy()
+    m_rlz_inverse_np = m_rlz_inverse.cpu().numpy()
+    H_jnt_np = H_jnt.cpu().numpy()
+    with Pool(cpu_count) as pool:
+        args_list = [(i, joint_rlz_np, m_rlz_inverse_np, H_jnt_np) for i in range(1, width+1)]
+        results = pool.map(compute_conditional_entropy_np, args_list)
+        s_H_c_mrg = sum(results)
+    # for i in range(1, width+1):
+    #     # compute the complemnet marginal rlz per neuron
+    #     c_m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=True)
+    #     # compute the conditional marginal pmf p(X_i|X_1,...,X_n)
+    #     c_m_pmf = create_pmf(c_m_rlz, dim=0)
+    #     # compute the conditional marginal entropy per neuron 
+    #     # e.g. H(X_1|X_2,X_3) = H(X_1,X_2,X_3) - H(X_2,X_3)
+    #     s_H_c_mrg += H_jnt + (torch.log2(c_m_pmf)).mean()
+    # #^ 
     # return the degree of redundancy v
     return s_H_c_mrg / H_jnt
 #^
 
-def save_r(name: str, expansion_factor: int, r: float, save_dir: Path) -> None:
+def save_r(name: str, train_config: dict, r: float, save_dir: Path) -> None:
     """
     Save the results of the analysis to a file.
     Args:
         name (str): The name of the sae or transcoder to use.
-        expansion_factor (int): The expansion factor of the sae.
+        train_config (dict): The training configuration of the 
+        sae or transcoder.
         r (float): The degree of redundancy r.
         save_dir (Path): The root directory where the results will be saved.
     """
     # create a dictionary of the results
     results = {
-        "expansion_factor": expansion_factor,
+        "train_config": train_config,
         "r": r
     }
     # check if redundancy.json file exists
