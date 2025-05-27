@@ -1,5 +1,5 @@
 import matplotlib
-matplotlib.use('Agg')  # Use a non-interactive backend for matplotlib
+# matplotlib.use('Agg')  # Use a non-interactive backend for matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -37,6 +37,12 @@ def plot_deg(results_path: Path, hookpoint:str, quantization:bool, lvl: int, bat
     #^
     x = np.array(x)
     y = np.array(y)
+    ###
+    # expansion factor in increasing order
+    sort_idx = np.argsort(x)
+    x= x[sort_idx]
+    y = y[sort_idx]
+    ###
     plt.figure(figsize=(10, 5))
     plt.plot(x,y, marker='o', linestyle='-', color='b')
     plt.title(plt_params['title'])
