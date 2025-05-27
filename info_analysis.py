@@ -194,11 +194,12 @@ def compute_marginal_entropy(args):
     i, joint_rlz_np, m_rlz_inverse_np = args
     joint_rlz = torch.from_numpy(joint_rlz_np)
     m_rlz_inverse = torch.from_numpy(m_rlz_inverse_np)
+    del joint_rlz_np, m_rlz_inverse_np
     m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=False)
     m_pmf = create_pmf(m_rlz)
     return -(torch.log2(m_pmf)).mean()
 #^
-def compute_r(joint_rlz: torch.Tensor, width: int) -> float:
+def compute_r(joint_rlz: torch.Tensor, width: int, parallel: bool = True) -> float:
     """
     Compute the degree of redundnacy of the joint pmf.
     It is computed by normalizing the sum of the marginal 
@@ -207,6 +208,7 @@ def compute_r(joint_rlz: torch.Tensor, width: int) -> float:
     Args:
         rlz (torch.Tensor): The realization tensor of shape (n_tokens, top_k).
         width (int): The number of neurons of the sae.
+        parallel (bool): If True, compute the marginal entropies in parallel.
     Returns:
         sum_i H(X_i)/H(X_1,...,X_n) (float): The degree of redundnacy r.
     """
@@ -220,22 +222,25 @@ def compute_r(joint_rlz: torch.Tensor, width: int) -> float:
     k = joint_rlz.shape[1]//2
     _, m_rlz_inverse = torch.unique(joint_rlz[:, :k], sorted=True, return_inverse=True)
     # compute sum_i H(X_i) (Note: range shifted by 1 due to -1 padding)
-    cpu_count = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
-    # Convert tensors to numpy arrays to avoid multiprocessing deadlocks
-    joint_rlz_np = joint_rlz.cpu().numpy()
-    m_rlz_inverse_np = m_rlz_inverse.cpu().numpy()
-    with Pool(cpu_count) as pool:
-        args_list = [(i, joint_rlz_np, m_rlz_inverse_np) for i in range(1, width+1)]
-        results = pool.map(compute_marginal_entropy, args_list)
-        s_H_mrg = sum(results)
-    # for i in range(1, width+1):
-    #     # compute the marginal rlz per neuron
-    #     m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=False)
-    #     # compute the marginal pmf p(X_i)
-    #     m_pmf = create_pmf(m_rlz)
-    #     # compute and add the marginal entropy H(X_i)
-    #     s_H_mrg += -(torch.log2(m_pmf)).mean()
-    # #^ 
+    if parallel:
+        cpu_count = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
+        print(f"Using {cpu_count} CPU cores for parallel computation.")
+        # Convert tensors to numpy arrays to avoid multiprocessing deadlocks
+        joint_rlz_np = joint_rlz.cpu().numpy()
+        m_rlz_inverse_np = m_rlz_inverse.cpu().numpy()
+        with Pool(cpu_count) as pool:
+            args_list = [(i, joint_rlz_np, m_rlz_inverse_np) for i in range(1, width+1)]
+            results = pool.map(compute_marginal_entropy, args_list)
+            s_H_mrg = sum(results)
+    else:
+        for i in range(1, width+1):
+            # compute the marginal rlz per neuron
+            m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=False)
+            # compute the marginal pmf p(X_i)
+            m_pmf = create_pmf(m_rlz)
+            # compute and add the marginal entropy H(X_i)
+            s_H_mrg += -(torch.log2(m_pmf)).mean()
+        #^ 
     # compute the degree of redundancy r 
     return s_H_mrg / H_jnt
 #^
