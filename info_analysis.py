@@ -300,7 +300,8 @@ def compute_v(joint_rlz: torch.Tensor, width: int) -> float:
     return s_H_c_mrg / H_jnt
 #^
 
-def save_r(name: str, train_config: dict, r: float, save_dir: Path) -> None:
+def save_results(name: str, train_config: dict, r: float, save_dir: Path, 
+           save_file:str) -> None:
     """
     Save the results of the analysis to a file.
     Args:
@@ -309,6 +310,7 @@ def save_r(name: str, train_config: dict, r: float, save_dir: Path) -> None:
         sae or transcoder.
         r (float): The degree of redundancy r.
         save_dir (Path): The root directory where the results will be saved.
+        save_file (str): The name of the file to save the results to.
     """
     # create a dictionary of the results
     # convert r to a float if it is a tensor
@@ -320,15 +322,15 @@ def save_r(name: str, train_config: dict, r: float, save_dir: Path) -> None:
         "r": r
     }
     # check if redundancy.json file exists
-    if not (save_dir / "redundancy.json").exists():
+    if not (save_dir / save_file).exists():
         # create the folder
         save_dir.mkdir(parents=True, exist_ok=True)
         # create the file and write the header
-        with open(save_dir / "redundancy.json", "w") as f:
+        with open(save_dir / save_file, "w") as f:
             json.dump({name: results }, f)
     else:
         # read the existing file and append the results
-        with open(save_dir / "redundancy.json", "r") as f:
+        with open(save_dir / save_file, "r") as f:
             data = json.load(f)
             # check if the name already exists in the file
             if name in data:
@@ -338,7 +340,7 @@ def save_r(name: str, train_config: dict, r: float, save_dir: Path) -> None:
                 # add a new entry
                 data[name] = results
         # write the updated data to the file
-        with open(save_dir / "redundancy.json", "w") as f:
+        with open(save_dir / save_file, "w") as f:
             json.dump(data, f)
     #^
 #^ 
