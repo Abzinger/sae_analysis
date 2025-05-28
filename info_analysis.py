@@ -5,7 +5,7 @@ from delphi.delphi.latents import LatentDataset
 from pathlib import Path
 from typing import Optional
 import json
-from multiprocessing import Pool#, cpu_count
+from multiprocessing import Pool
 import os
 
 
@@ -225,10 +225,11 @@ def compute_r(joint_rlz: torch.Tensor, width: int, parallel: bool = True) -> flo
     if parallel:
         cpu_count = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
         print(f"Using {cpu_count} CPU cores for parallel computation.")
+        print(f"Using {32} CPU cores in parallel.")
         # Convert tensors to numpy arrays to avoid multiprocessing deadlocks
         joint_rlz_np = joint_rlz.cpu().numpy()
         m_rlz_inverse_np = m_rlz_inverse.cpu().numpy()
-        with Pool(cpu_count) as pool:
+        with Pool(32) as pool:
             args_list = [(i, joint_rlz_np, m_rlz_inverse_np) for i in range(1, width+1)]
             results = pool.map(compute_marginal_entropy, args_list)
             s_H_mrg = sum(results)
@@ -246,17 +247,26 @@ def compute_r(joint_rlz: torch.Tensor, width: int, parallel: bool = True) -> flo
 #^
 
 def compute_conditional_entropy(args):
-        i, joint_rlz, m_rlz_inverse, H_jnt = args
-        c_m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=True)
-        c_m_pmf = create_pmf(c_m_rlz, dim=0)
-        return H_jnt + (torch.log2(c_m_pmf)).mean()
-def compute_conditional_entropy_np(args):
+        """
+        Compute the conditional entropy of a neuron given the joint realization.
+        Args:
+            args (tuple): A tuple containing the neuron id, the joint realization
+                tensor, the inverse mapping of the marginal realization, and 
+                the joint entropy.
+        Returns:
+            entropy (float): The conditional entropy of the neuron.
+        """
         i, joint_rlz_np, m_rlz_inverse_np, H_jnt_np = args
         joint_rlz = torch.from_numpy(joint_rlz_np)
         m_rlz_inverse = torch.from_numpy(m_rlz_inverse_np)
         H_jnt = torch.from_numpy(H_jnt_np)
-        return compute_conditional_entropy((i, joint_rlz, m_rlz_inverse, H_jnt))
-def compute_v(joint_rlz: torch.Tensor, width: int) -> float:
+        del joint_rlz_np, m_rlz_inverse_np, H_jnt_np
+        c_m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=True)
+        c_m_pmf = create_pmf(c_m_rlz, dim=0)
+        return H_jnt + (torch.log2(c_m_pmf)).mean()
+#^ 
+
+def compute_v(joint_rlz: torch.Tensor, width: int, parallel: bool = True) -> float:
     """
     Compute the degree of vulnerability of the joint pmf.
     It is computed by normalizing the sum of the conditional 
@@ -283,19 +293,23 @@ def compute_v(joint_rlz: torch.Tensor, width: int) -> float:
     joint_rlz_np = joint_rlz.cpu().numpy()
     m_rlz_inverse_np = m_rlz_inverse.cpu().numpy()
     H_jnt_np = H_jnt.cpu().numpy()
-    with Pool(cpu_count) as pool:
-        args_list = [(i, joint_rlz_np, m_rlz_inverse_np, H_jnt_np) for i in range(1, width+1)]
-        results = pool.map(compute_conditional_entropy_np, args_list)
-        s_H_c_mrg = sum(results)
-    # for i in range(1, width+1):
-    #     # compute the complemnet marginal rlz per neuron
-    #     c_m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=True)
-    #     # compute the conditional marginal pmf p(X_i|X_1,...,X_n)
-    #     c_m_pmf = create_pmf(c_m_rlz, dim=0)
-    #     # compute the conditional marginal entropy per neuron 
-    #     # e.g. H(X_1|X_2,X_3) = H(X_1,X_2,X_3) - H(X_2,X_3)
-    #     s_H_c_mrg += H_jnt + (torch.log2(c_m_pmf)).mean()
-    # #^ 
+    if parallel:
+        print(f"Using {cpu_count} CPU cores for parallel computation.")
+        print(f"Using {32} CPU cores in parallel.")
+        with Pool(32) as pool:
+            args_list = [(i, joint_rlz_np, m_rlz_inverse_np, H_jnt_np) for i in range(1, width+1)]
+            results = pool.map(compute_conditional_entropy, args_list)
+            s_H_c_mrg = sum(results)
+    else:
+        for i in range(1, width+1):
+            # compute the complemnet marginal rlz per neuron
+            c_m_rlz = create_marginal_rlz(joint_rlz, m_rlz_inverse, i, complementary=True)
+            # compute the conditional marginal pmf p(X_i|X_1,...,X_n)
+            c_m_pmf = create_pmf(c_m_rlz, dim=0)
+            # compute the conditional marginal entropy per neuron 
+            # e.g. H(X_1|X_2,X_3) = H(X_1,X_2,X_3) - H(X_2,X_3)
+            s_H_c_mrg += H_jnt + (torch.log2(c_m_pmf)).mean()
+        #^ 
     # return the degree of redundancy v
     return s_H_c_mrg / H_jnt
 #^
