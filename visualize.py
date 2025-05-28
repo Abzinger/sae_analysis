@@ -53,6 +53,10 @@ def plot_deg(results_path: Path, hookpoint:str, quantization:bool, lvl: int, bat
     plt.yticks(plt_params['yticks'])
     plt.ylim(plt_params['ylim'])
     plt.grid(plt_params['grid'])
+    if plt_params['xscale'][0]:
+        plt.xscale(plt_params['xscale'][1], base=plt_params['xscale'][2])
+    if plt_params['yscale'][0]: 
+        plt.yscale(plt_params['yscale'][1], base=plt_params['yscale'][2])
     plt.tight_layout()
     # plt.show()
     # plot_path = results_path.with_suffix('.png')
