@@ -8,7 +8,7 @@ from typing import Optional
 import json
 import os
 
-def plot_deg(results_path: Path, hookpoint:str, quantization:bool, lvl: int, batch_size: int,plt_params: dict):
+def plot_deg(results_path: Path, exp_params:dict, plt_params: dict):
     """
     Plot the degree of redundancy from the results file.
 
@@ -27,12 +27,16 @@ def plot_deg(results_path: Path, hookpoint:str, quantization:bool, lvl: int, bat
     y = []
     for value in results.values():
         params = value["train_config"]
-        if params["hookpoints"][0] == hookpoint and \
-            params["sae"]["quantization"] == quantization and \
-           params["sae"]["quantization_levels"] == lvl and \
-           params["batch_size"] == batch_size:
+        if params["hookpoints"][0] == exp_params['hkpt'] and \
+        params["sae"]["quantization"] == exp_params['qt'] and \
+        params["sae"]["quantization_levels"] == exp_params['lvls'] and \
+        params["sae"]["k"] == exp_params['k'] and \
+        params["batch_size"] == exp_params['b_sz']:
             x.append(params["sae"]["expansion_factor"])
-            y.append(value["r"])
+            if exp_params['deg'] == 'r':
+                y.append(value["r"])
+            elif exp_params['deg'] == 'v':
+                y.append(value["v"])
         #^
     #^
     x = np.array(x)
