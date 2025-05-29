@@ -314,7 +314,7 @@ def compute_v(joint_rlz: torch.Tensor, width: int, parallel: bool = True) -> flo
     return s_H_c_mrg / H_jnt
 #^
 
-def save_results(name: str, train_config: dict, r: float, save_dir: Path, 
+def save_results(name: str, train_config: dict, res: float, save_dir: Path, 
            save_file:str) -> None:
     """
     Save the results of the analysis to a file.
@@ -322,19 +322,25 @@ def save_results(name: str, train_config: dict, r: float, save_dir: Path,
         name (str): The name of the sae or transcoder to use.
         train_config (dict): The training configuration of the 
         sae or transcoder.
-        r (float): The degree of redundancy r.
+        res (float): The degree of redundancy or vulnerability.
         save_dir (Path): The root directory where the results will be saved.
         save_file (str): The name of the file to save the results to.
     """
     # create a dictionary of the results
     # convert r to a float if it is a tensor
-    if isinstance(r, torch.Tensor):
-        print("Converting r to a float...")
-        r = r.cpu().item()
-    results = {
-        "train_config": train_config,
-        "r": r
-    }
+    if isinstance(res, torch.Tensor):
+        print("Converting res to a float...")
+        res = res.cpu().item()
+    if save_file == "redundancy.json":
+        results = {
+            "train_config": train_config,
+            "r": res
+        }
+    else:
+        results = {
+            "train_config": train_config,
+            "v": res,
+        }
     # check if redundancy.json file exists
     if not (save_dir / save_file).exists():
         # create the folder
