@@ -199,7 +199,8 @@ def compute_marginal_entropy(args):
     m_pmf = create_pmf(m_rlz)
     return -(torch.log2(m_pmf)).mean()
 #^
-def compute_r(joint_rlz: torch.Tensor, width: int, parallel: bool = True) -> float:
+def compute_r(joint_rlz: torch.Tensor, width: int, cpu_count: int, 
+              parallel: bool = False) -> torch.Tensor:
     """
     Compute the degree of redundnacy of the joint pmf.
     It is computed by normalizing the sum of the marginal 
@@ -208,6 +209,7 @@ def compute_r(joint_rlz: torch.Tensor, width: int, parallel: bool = True) -> flo
     Args:
         rlz (torch.Tensor): The realization tensor of shape (n_tokens, top_k).
         width (int): The number of neurons of the sae.
+        cpu_count (int): The number of CPU cores to use for parallel computation.
         parallel (bool): If True, compute the marginal entropies in parallel.
     Returns:
         sum_i H(X_i)/H(X_1,...,X_n) (float): The degree of redundnacy r.
@@ -223,13 +225,13 @@ def compute_r(joint_rlz: torch.Tensor, width: int, parallel: bool = True) -> flo
     _, m_rlz_inverse = torch.unique(joint_rlz[:, :k], sorted=True, return_inverse=True)
     # compute sum_i H(X_i) (Note: range shifted by 1 due to -1 padding)
     if parallel:
-        cpu_count = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
-        print(f"Using {cpu_count} CPU cores for parallel computation.")
-        print(f"Using {32} CPU cores in parallel.")
+        t_cpu_count = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
+        print(f"Using {t_cpu_count} CPU cores for parallel computation.")
+        print(f"Using {cpu_count} CPU cores in parallel.")
         # Convert tensors to numpy arrays to avoid multiprocessing deadlocks
         joint_rlz_np = joint_rlz.cpu().numpy()
         m_rlz_inverse_np = m_rlz_inverse.cpu().numpy()
-        with Pool(32) as pool:
+        with Pool(cpu_count) as pool:
             args_list = [(i, joint_rlz_np, m_rlz_inverse_np) for i in range(1, width+1)]
             results = pool.map(compute_marginal_entropy, args_list)
             s_H_mrg = sum(results)
@@ -266,7 +268,8 @@ def compute_conditional_entropy(args):
         return H_jnt + (torch.log2(c_m_pmf)).mean()
 #^ 
 
-def compute_v(joint_rlz: torch.Tensor, width: int, parallel: bool = True) -> float:
+def compute_v(joint_rlz: torch.Tensor, width: int, cpu_count: int, 
+              parallel: bool = False) -> torch.Tensor:
     """
     Compute the degree of vulnerability of the joint pmf.
     It is computed by normalizing the sum of the conditional 
@@ -275,6 +278,9 @@ def compute_v(joint_rlz: torch.Tensor, width: int, parallel: bool = True) -> flo
     Args:
         rlz (torch.Tensor): The realization tensor of shape (n_tokens, top_k).
         width (int): The number of neurons of the sae.
+        cpu_count (int): The number of CPU cores to use for parallel computation.
+        parallel (bool): If True, compute the conditional marginal entropies 
+        in parallel.
     Returns:
         sum_i H(X_i|X_1,...,X_n)/H(X_1,...,X_n): The degree of vulnerability v.
     """
@@ -289,14 +295,14 @@ def compute_v(joint_rlz: torch.Tensor, width: int, parallel: bool = True) -> flo
     _, m_rlz_inverse = torch.unique(joint_rlz[:, :k], sorted=True, return_inverse=True)
     # compute sum_i H(X_i|X_1,...,X_n) (Note: range shifted by 1 due to -1 padding)
     
-    cpu_count = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
+    t_cpu_count = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
     joint_rlz_np = joint_rlz.cpu().numpy()
     m_rlz_inverse_np = m_rlz_inverse.cpu().numpy()
     H_jnt_np = H_jnt.cpu().numpy()
     if parallel:
-        print(f"Using {cpu_count} CPU cores for parallel computation.")
-        print(f"Using {32} CPU cores in parallel.")
-        with Pool(32) as pool:
+        print(f"Using {t_cpu_count} CPU cores for parallel computation.")
+        print(f"Using {cpu_count} CPU cores in parallel.")
+        with Pool(cpu_count) as pool:
             args_list = [(i, joint_rlz_np, m_rlz_inverse_np, H_jnt_np) for i in range(1, width+1)]
             results = pool.map(compute_conditional_entropy, args_list)
             s_H_c_mrg = sum(results)
