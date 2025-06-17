@@ -182,9 +182,22 @@ def plot_deg_scan(results_path: Path, exp_params:dict, scan_param:dict, plt_para
     #^
     ### plotting
     
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=plt_params['figsize'], dpi=plt_params['dpi'])
+    plt.rcParams.update({'font.size': plt_params['fontsize']})
+    assert len(plt_params['legend']) == 1+len(scan_param[scan_key]), \
+              f"Legend must have {1+len(scan_param[scan_key])} elements, got {len(plt_params['legend'])}."
+    assert len(plt_params['linestyles']) == len(scan_param[scan_key]), \
+              f"Linestyle must have {len(scan_param[scan_key])} elements, got {len(plt_params['linestyles'])}."
+    assert len(plt_params['colors']) == len(scan_param[scan_key]), \
+              f"Colors must have {len(scan_param[scan_key])} elements, got {len(plt_params['colors'])}."
+    assert len(plt_params['markers']) == len(scan_param[scan_key]), \
+              f"Marker must have {len(scan_param[scan_key])} elements, got {len(plt_params['marker'])}."
     for i in range(len(scan_param[scan_key])):
-        plt.plot(x[i,:], y[i,:], marker='o', linestyle='-', label=f"{scan_key}={scan_param[scan_key][i]}")
+        plt.plot(x[i,:], y[i,:], marker=plt_params['markers'][i], 
+                 markersize=plt_params['markersize'],
+                 linestyle=plt_params['linestyles'][i], 
+                 color=plt_params['colors'][i],
+                 label=plt_params['legend'][i+1])
     #^
     plt.title(plt_params['title'])
     plt.xlabel(plt_params['xlabel'])
@@ -194,16 +207,18 @@ def plot_deg_scan(results_path: Path, exp_params:dict, scan_param:dict, plt_para
     plt.yticks(plt_params['yticks'])
     plt.ylim(plt_params['ylim'])
     plt.grid(plt_params['grid'])
+    # plt.fontsize(plt_params['fontsize'])
     if plt_params['xscale'][0]:
         plt.xscale(plt_params['xscale'][1], base=plt_params['xscale'][2])
     if plt_params['yscale'][0]: 
         plt.yscale(plt_params['yscale'][1], base=plt_params['yscale'][2])
-    if plt_params['legend']:
+    if plt_params['legend'][0]:
         plt.legend()
     plt.tight_layout()
+    if plt_params['savefig'][0]:
+        # plot_path = results_path.with_name(plt_params['savefig'][1])
+        plt.savefig(plt_params['savefig'][1])
     plt.show()
-    # plot_path = results_path.with_suffix('.png')
-    # plt.savefig(plot_path)
     plt.close()
 
     # print(f"Plot saved to {plot_path}")
