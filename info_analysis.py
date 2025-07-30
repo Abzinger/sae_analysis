@@ -15,7 +15,7 @@ def create_joint_rlz(run_cfg: RunConfig,
                      name: str,
                      modules: list[str],
                      raw_dir: Path,
-                     save_dir: Path) -> torch.Tensor:
+                     save_dir: Optional[Path]=None) -> torch.Tensor:
     """
     Create a sparse tensor of the realization (tokens, activations) 
     of the SAE or transcoder.
@@ -44,7 +44,7 @@ def create_joint_rlz(run_cfg: RunConfig,
     
     print("reading raw tokens activation as latent datase...")
     latent_dataset = LatentDataset(
-        raw_dir=raw_dir / name,
+        raw_dir=raw_dir,
         sampler_cfg=sampler_cfg,
         constructor_cfg=constructor_cfg,
         tokenizer=tokenizer,
@@ -109,10 +109,13 @@ def create_joint_rlz(run_cfg: RunConfig,
     _act = _act[:-1]
     rlz[:, :train_config["sae"]["k"]] = _tok
     rlz[:, train_config["sae"]["k"]:] = _act
-    
-    print("saving the rlz tensor...")
-    t_name = "rlz_" + name + ".pt"
-    torch.save(rlz, save_dir / t_name)
+    if save_dir is not None:
+        print("saving the rlz tensor...")
+        t_name = "rlz_" + name + ".pt"
+        torch.save(rlz, save_dir / t_name)
+    else:
+        print("not saving the rlz tensor...")
+    #^
 
     return rlz
 #^
