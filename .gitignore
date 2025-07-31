@@ -4,6 +4,7 @@ wandb/
 checkpoints/
 raw_latents/
 results/
+statistics/
 *.yml
 wandb_init.py
 test_micromamba.py
