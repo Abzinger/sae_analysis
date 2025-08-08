@@ -40,14 +40,12 @@ def load_explanations(path: Path, modules: list) -> pd.DataFrame:
                 [{"latent_idx": latent_idx, "explanation": explanation}]
             ))
     return pd.concat(explanation_dfs, ignore_index=True)
-#^
-def _check_dection_non_activating(
-    latent_df: pd.DataFrame,
-    run_cfg: Optional[dict] = None,
-) -> pd.DataFrame:
+
+def _check_detection_non_activating(latent_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Check the detection of non-activating examples in the latent DataFrame.
-    
+    Check for the number of non-zero activations for non-activating examples of 
+    Detection scoring in the latent DataFrame.
+
     Args:
         latent_df (pd.DataFrame): DataFrame containing latent data.
         run_cfg (Optional[dict]): Configuration for the run, if any.
@@ -56,7 +54,8 @@ def _check_dection_non_activating(
         counts of non-activating examples with activations greater than zero.
     """
     # Filter for non-activating examples
-    data = latent_df[(latent_df["activating"] == False) & (latent_df["score_type"] == "detection")]
+    data = latent_df[(latent_df["activating"] == False) & 
+                     (latent_df["score_type"] == "detection")]
     
     # Calculate sum of activations
     norm_1 = data.activations.apply(lambda x: np.array(x).sum())
@@ -82,3 +81,57 @@ def _load_sae_cfg(
         sae_cfg = json.load(f)
     
     return sae_cfg
+
+def find_activating_tokens(df: pd.DataFrame, sae_cfg: dict, 
+                           threshold: float = 1.0) -> np.ndarray:
+    """
+    Takes the latent data of the activating examples from detection scoring and returns 
+    a padded array of activating tokens for each latent.
+    
+    Args:
+        df (pd.DataFrame): DataFrame containing the latent data
+        of the activating examples from detection scoring.
+        sae_cfg (dict): Configuration for the SAE.
+        threshold (float): Threshold for activation filtering.
+        
+    Returns:
+        np.ndarray: A padded array of activating tokens for each latent.
+    """
+    width = sae_cfg["expansion_factor"] * sae_cfg["d_in"]
+    act_tokens_list = []
+    # Iterate over each latent index   
+    for i in range(width):
+        data_i = df[(df.latent_idx == i) & (df.correct == True)]
+        _act_tokens = []
+        for raw in data_i.itertuples():
+            acts = np.array(raw.activations)
+            tokens = np.array(raw.tokens)
+            idx = acts > threshold
+            _act_tokens.extend(tokens[idx].flatten().tolist())
+        # Collect activation tokens for the current latent index
+        act_tokens_list.append(np.array(_act_tokens))
+    # Pad the activation tokens to the same length
+    max_len = max(map(len, act_tokens_list))
+    act_tokens = np.array([np.pad(arr, (0, max_len - len(arr)), constant_values=np.nan) 
+                           for arr in act_tokens_list])
+    
+    return act_tokens
+
+def common_tokens(lat1: np.array, lat2: np.array) -> int:
+    """
+    The common tokens between two arrays.
+
+    Args:
+        lat1 (np.array): tokens of the first latent.
+        lat2 (np.array): tokens of the second latent.
+
+    Returns:
+        set: Common tokens between the two latents.
+    """
+    # ignore the NaN values in the latents
+    lat1 = lat1[~np.isnan(lat1)]
+    lat2 = lat2[~np.isnan(lat2)]
+    # convert to sets and find the intersection
+    set1 = set(lat1)
+    set2 = set(lat2)
+    return set1.intersection(set2)
