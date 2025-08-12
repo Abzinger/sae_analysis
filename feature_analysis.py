@@ -34,7 +34,9 @@ def load_explanations(path: Path, modules: list) -> pd.DataFrame:
             latent_idx = int(file.stem.split("latent")[-1])
             explanation = orjson.loads(file.read_bytes())
             explanation_dfs.append(pd.DataFrame(
-                [{"latent_idx": latent_idx, "explanation": explanation}]
+                [{"latent_idx": latent_idx, 
+                  "explanation": explanation,
+                  "module": module}]
             ))
     return pd.concat(explanation_dfs, ignore_index=True)
 
@@ -88,7 +90,11 @@ class TokenSimilarity:
     def __init__(self, df1: pd.DataFrame, 
                  df2: pd.DataFrame,
                  sae_cfg1: dict,
-                 sae_cfg2: dict):
+                 sae_cfg2: dict,
+                 threshold: float = 1.0,
+                #  sorted_indices1: Optional[np.array] = None,
+                #  sorted_indices2: Optional[np.array] = None,
+                 common_cache: Optional[np.array] = None):
         """
         Initialize the TokenSimilarity with two SAEs.
 
@@ -104,9 +110,17 @@ class TokenSimilarity:
         self.df2 = df2
         self.sae_cfg1 = sae_cfg1
         self.sae_cfg2 = sae_cfg2
+        self.threshold = threshold
+        self.sorted_indices1 = None
+        self.sorted_indices2 = None
+        if common_cache is not None:
+            self.common_cache = common_cache
+        else:
+            width1 = self.sae_cfg1["expansion_factor"] * self.sae_cfg1["d_in"]
+            width2 = self.sae_cfg2["expansion_factor"] * self.sae_cfg2["d_in"]
+            self.common_cache: np.array = np.zeros((width1, width2), dtype=float)
 
-    def find_activating_tokens(df: pd.DataFrame, sae_cfg: dict,
-                            threshold: float = 1.0) -> np.ndarray:
+    def find_activating_tokens(self, df: pd.DataFrame, sae_cfg: dict) -> np.ndarray:
         """
         Takes the latent data of the activating examples from detection scoring and 
         returns a padded array of activating tokens for each latent.
@@ -128,8 +142,8 @@ class TokenSimilarity:
             _act_tokens = []
             for raw in data_i.itertuples():
                 acts = np.array(raw.activations)
-                tokens = np.array(raw.tokens)
-                idx = acts > threshold
+                tokens = np.array(raw.text)
+                idx = acts > self.threshold
                 _act_tokens.extend(tokens[idx].flatten().tolist())
             # Collect activation tokens for the current latent index
             act_tokens_list.append(np.array(_act_tokens))
@@ -141,9 +155,28 @@ class TokenSimilarity:
         
         return act_tokens
     #^
-    def ignore_padding(self, latents: np.array) -> np.array: 
+    def order_activating_tokens(self, act_tokens: np.array) -> np.array:
+        """
+        Order the activating tokens by their frequency in the latent.
+
+        Args:
+            act_tokens (np.array): Array of activating tokens for each latent.
+
+        Returns:
+            np.array: Ordered array of activating tokens.
+        """
+        token_counts = np.array([np.sum(arr == "-1.0") for arr in act_tokens])
+        sorted_indices = np.argsort(token_counts)
+        width1 = self.sae_cfg1["expansion_factor"] * self.sae_cfg1["d_in"]
+        if act_tokens.shape[0] == width1:
+            self.sorted_indices1 = sorted_indices
+        else:
+            self.sorted_indices2 = sorted_indices
+        return act_tokens[sorted_indices]
+    #^
+    def ignore_padding(self, latents: np.array) -> np.array:
         return latents[latents != '-1.0']
-    
+    #^
     def common_tokens(self, lat1: np.array, lat2: np.array) -> set:
         """
         The common tokens between two latents.
@@ -164,7 +197,8 @@ class TokenSimilarity:
         return set1.intersection(set2)
     #^
     def compute_similarity(self, 
-                           type: Literal['raw', 'jaccard', 'small']
+                           type: Literal['raw', 'jaccard', 'small', 'big'],
+                           sorted: bool = False
                            ) -> np.array:
         """
         Compute the similarity between the tokens of the smaller and larger SAEs.
@@ -174,44 +208,70 @@ class TokenSimilarity:
             two SAEs (rows are latents of the smaller SAE).
         """
         # tokens_common = [] (no need to store all tokens)
-        width1 = self.sae_cfg1["expansion_factor"] * self.sae_cfg1["d_in"]
-        width2 = self.sae_cfg2["expansion_factor"] * self.sae_cfg2["d_in"]
         act_tokens1 = self.find_activating_tokens(self.df1, self.sae_cfg1)
         act_tokens2 = self.find_activating_tokens(self.df2, self.sae_cfg2)
-        # Initialize the latent_common array
-        latent_common = np.zeros((width1, width2), dtype=int)
+        if sorted:
+            act_tokens1 = self.order_activating_tokens(act_tokens1)
+            act_tokens2 = self.order_activating_tokens(act_tokens2)
         for i in range(len(act_tokens1)):
             # _token_common = []
             for j in range(len(act_tokens2)):
-                common = self.common_tokens(act_tokens1[i], act_tokens2[j])
+                # if dead latent, set common to NaN
+                if np.all(act_tokens1[i] == '-1.0') or np.all(act_tokens2[j] == '-1.0'):
+                    self.common_cache[i, j] = np.nan
+                    continue
+                else:
+                    common = self.common_tokens(act_tokens1[i], act_tokens2[j])
                 # _token_common.append(common)
                 if type == 'raw':
                     # Raw similarity
-                    latent_common[i, j] = len(common)
+                    self.common_cache[i, j] = len(common)
                 elif type == 'jaccard':
                     # Jaccard similarity
                     lat1 = self.ignore_padding(act_tokens1[i])
                     lat2 = self.ignore_padding(act_tokens2[j])
                     if len(lat1) + len(lat2) - len(common) == 0:
-                        latent_common[i, j] = 0
+                        self.common_cache[i, j] = 0
                     else:
-                        latent_common[i, j] = len(common) / (len(lat1) + len(lat2) - len(common))
+                        self.common_cache[i, j] = len(common) / (len(lat1) + len(lat2) - len(common))
                 elif type == 'small':
                     # Small similarity
                     lat1 = self.ignore_padding(act_tokens1[i])
                     if len(lat1) == 0:
-                        latent_common[i, j] = 0
+                        self.common_cache[i, j] = 0
                     else:
                         # Normalize by the smaller latent size
-                        latent_common[i, j] = len(common) / len(lat1)
+                        self.common_cache[i, j] = len(common) / len(lat1)
+                elif type == 'big':
+                    # Big similarity
+                    lat2 = self.ignore_padding(act_tokens2[j])
+                    if len(lat2) == 0:
+                        self.common_cache[i, j] = 0
+                    else:
+                        # Normalize by the smaller latent size
+                        self.common_cache[i, j] = len(common) / len(lat2)
                 else:
                     raise ValueError(
-                        f"Invalid {type}. Choose from 'raw', 'jaccard', or 'small'."
+                        f"Invalid {type}. Choose from 'raw', 'jaccard', 'small', or 'big'."
                         )
             #^
             # tokens_common.append(_token_common)
         #^
-        return latent_common
+        return self.common_cache
+    def save_common_cache(self, path: str) -> None:
+        """
+        Save the common cache to the path as a json file
+        """
+        with open(path + f".json", "w") as f:
+            json.dump(self.common_cache, f)
+    #^
+    def load_common_cache(self, path: str) -> dict[str, dict[int, list[int]]]:
+        """
+        Load the common cache from the path as a json file
+        """
+        with open(path, "r") as f:
+            return json.load(f)
+    #^
 
 class DecoderSimilarity:
     """
@@ -219,8 +279,8 @@ class DecoderSimilarity:
     """
 
     def __init__(self,
-                 sae1: Optional[torch.Module] = None, 
-                 sae2: Optional[torch.Module] = None,
+                 sae1: Optional[torch.nn.Module] = None,
+                 sae2: Optional[torch.nn.Module] = None,
                  number_of_neighbours: int = 10,
                  neighbour_cache: Optional[dict[int, list[tuple[int, float]]]] = None):
         """
@@ -302,7 +362,7 @@ class DecoderSimilarity:
         """
         Save the neighbour cache to the path as a json file
         """
-        with open(path + f"-{self.method}.json", "w") as f:
+        with open(path + f".json", "w") as f:
             json.dump(self.neighbour_cache, f)
     #^
     def load_neighbour_cache(self, path: str) -> dict[str, dict[int, list[int]]]:
