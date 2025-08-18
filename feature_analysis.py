@@ -113,6 +113,7 @@ class TokenSimilarity:
         self.threshold = threshold
         self.sorted_indices1 = None
         self.sorted_indices2 = None
+        self.sim_type: str = None
         if common_cache is not None:
             self.common_cache = common_cache
         else:
@@ -197,7 +198,7 @@ class TokenSimilarity:
         return set1.intersection(set2)
     #^
     def compute_similarity(self, 
-                           type: Literal['raw', 'jaccard', 'small', 'big'],
+                           sim_type: Literal['raw', 'jaccard', 'small', 'big'],
                            sorted: bool = False
                            ) -> np.array:
         """
@@ -208,6 +209,7 @@ class TokenSimilarity:
             two SAEs (rows are latents of the smaller SAE).
         """
         # tokens_common = [] (no need to store all tokens)
+        self.sim_type = sim_type
         act_tokens1 = self.find_activating_tokens(self.df1, self.sae_cfg1)
         act_tokens2 = self.find_activating_tokens(self.df2, self.sae_cfg2)
         if sorted:
@@ -223,10 +225,10 @@ class TokenSimilarity:
                 else:
                     common = self.common_tokens(act_tokens1[i], act_tokens2[j])
                 # _token_common.append(common)
-                if type == 'raw':
+                if self.sim_type == 'raw':
                     # Raw similarity
                     self.common_cache[i, j] = len(common)
-                elif type == 'jaccard':
+                elif self.sim_type == 'jaccard':
                     # Jaccard similarity
                     lat1 = self.ignore_padding(act_tokens1[i])
                     lat2 = self.ignore_padding(act_tokens2[j])
@@ -234,7 +236,7 @@ class TokenSimilarity:
                         self.common_cache[i, j] = 0
                     else:
                         self.common_cache[i, j] = len(common) / (len(lat1) + len(lat2) - len(common))
-                elif type == 'small':
+                elif sim_type == 'small':
                     # Small similarity
                     lat1 = self.ignore_padding(act_tokens1[i])
                     if len(lat1) == 0:
@@ -242,7 +244,7 @@ class TokenSimilarity:
                     else:
                         # Normalize by the smaller latent size
                         self.common_cache[i, j] = len(common) / len(lat1)
-                elif type == 'big':
+                elif sim_type == 'big':
                     # Big similarity
                     lat2 = self.ignore_padding(act_tokens2[j])
                     if len(lat2) == 0:
@@ -252,7 +254,7 @@ class TokenSimilarity:
                         self.common_cache[i, j] = len(common) / len(lat2)
                 else:
                     raise ValueError(
-                        f"Invalid {type}. Choose from 'raw', 'jaccard', 'small', or 'big'."
+                        f"Invalid {sim_type}. Choose from 'raw', 'jaccard', 'small', or 'big'."
                         )
             #^
             # tokens_common.append(_token_common)
@@ -262,7 +264,7 @@ class TokenSimilarity:
         """
         Save the common cache to the path as a json file
         """
-        with open(path + f".json", "w") as f:
+        with open(path + f"_{self.sim_type}.json", "w") as f:
             json.dump(self.common_cache, f)
     #^
     def load_common_cache(self, path: str) -> dict[str, dict[int, list[int]]]:
@@ -281,32 +283,32 @@ class DecoderSimilarity:
     def __init__(self,
                  sae1: Optional[torch.nn.Module] = None,
                  sae2: Optional[torch.nn.Module] = None,
-                 number_of_neighbours: int = 10,
-                 neighbour_cache: Optional[dict[int, list[tuple[int, float]]]] = None):
+                 number_of_neighbors: int = 10,
+                 neighbor_cache: Optional[dict[int, list[tuple[int, float]]]] = None):
         """
         Initialize a DecoderSimilarity.
 
         Args:
             sae1 (Optional[torch.Module]): The smaller SAE.
             sae2 (Optional[torch.Module]): The larger SAE.
-            number_of_neighbours (int): Number of neighbours to consider for similarity.
-            neighbour_cache (Optional[dict[int, list[tuple[int, float]]]]):
-                Precomputed neighbour cache for the smaller SAE.
+            number_of_neighbors (int): Number of neighbors to consider for similarity.
+            neighbor_cache (Optional[dict[int, list[tuple[int, float]]]]):
+                Precomputed neighbor cache for the smaller SAE.
         """
         self.sae1 = sae1
         self.sae2 = sae2
-        self.number_of_neighbours = number_of_neighbours
-        if neighbour_cache is not None:
-            self.neighbour_cache = neighbour_cache
+        self.number_of_neighbors = number_of_neighbors
+        if neighbor_cache is not None:
+            self.neighbor_cache = neighbor_cache
         else:
-            self.neighbour_cache = dict[int, list[tuple[int, float]]] = {}
+            self.neighbor_cache: dict[int, list[tuple[int, float]]] = {}
         #^
     def _compute_d_similarity(self) -> dict[int, list[tuple[int, float]]]:
         """
         Compute the similarity between the latents of two SAEs based on their decoders.
 
         Returns:
-            dict: the neighbour lists from larger SAE for each latent in sae1
+            dict: the neighbor lists from larger SAE for each latent in sae1
         """
         assert isinstance(
                 self.sae1, Sae
@@ -325,7 +327,7 @@ class DecoderSimilarity:
         batch_size = weight_matrix_normalized1.shape[0]
         number_latents = batch_size
 
-        neighbour_lists = {}
+        neighbor_lists = {}
         while not done:
             try:
                 for start in tqdm(range(0, number_latents, batch_size)):
@@ -334,9 +336,9 @@ class DecoderSimilarity:
                     # remove nan values
                     similarity_matrix = torch.nan_to_num(similarity_matrix, 0)
                     indices, values = torch.topk(
-                        similarity_matrix, self.number_of_neighbours + 1, dim=1
+                        similarity_matrix, self.number_of_neighbors + 1, dim=1
                     )
-                    neighbour_lists.update(
+                    neighbor_lists.update(
                         {
                             i
                             + start: list(
@@ -356,19 +358,19 @@ class DecoderSimilarity:
                         "You don't have enough memory."
                     )
         #^
-        return neighbour_lists
+        return neighbor_lists
 
-    def save_neighbour_cache(self, path: str) -> None:
+    def save_neighbor_cache(self, path: str) -> None:
         """
-        Save the neighbour cache to the path as a json file
+        Save the neighbor cache to the path as a json file
         """
-        with open(path + f".json", "w") as f:
-            json.dump(self.neighbour_cache, f)
+        with open(path + f"_decoder_sim.json", "w") as f:
+            json.dump(self.neighbor_cache, f)
     #^
-    def load_neighbour_cache(self, path: str) -> dict[str, dict[int, list[int]]]:
+    def load_neighbor_cache(self, path: str) -> dict[str, dict[int, list[int]]]:
         """
-        Load the neighbour cache from the path as a json file
+        Load the neighbor cache from the path as a json file
         """
-        with open(path, "r") as f:
+        with open(path + f"_decoder_sim.json", "r") as f:
             return json.load(f)
     #^
