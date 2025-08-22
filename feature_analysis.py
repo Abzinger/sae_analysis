@@ -349,17 +349,15 @@ class TokenSimilarity:
         return self.common_cache
     def save_common_cache(self, path: str) -> None:
         """
-        Save the common cache to the path as a json file
+        Save the common cache to the path 
         """
-        with open(path + f"_{self.sim_type}.json", "w") as f:
-            json.dump(self.common_cache, f)
-    #^
+        # the common cache is a numpy array
+        np.save(path + f"_{self.sim_type}.npy", self.common_cache)
     def load_common_cache(self, path: str) -> dict[str, dict[int, list[int]]]:
         """
-        Load the common cache from the path as a json file
+        Load the common cache from the path 
         """
-        with open(path, "r") as f:
-            return json.load(f)
+        return np.load(path)
     #^
 
 class DecoderSimilarity:
