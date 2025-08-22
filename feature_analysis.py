@@ -17,9 +17,10 @@ import numpy as np
 from sparsify.sparsify import Sae
 from tqdm import tqdm
 
-def load_explanations(path: Path, modules: list) -> pd.DataFrame:
+def process_raw_explanations(path: Path, modules: list) -> pd.DataFrame:
     """
-    Load explanations from files in the specified path for the given modules.
+    Load explanations from a directory of files (one per latent), 
+    save them into a pd.DataFrame, and delete the files.
     Args:
         path (Path): The directory path where explanation files are stored.
         modules (list): List of SAE hookpoints.
@@ -38,7 +39,93 @@ def load_explanations(path: Path, modules: list) -> pd.DataFrame:
                   "explanation": explanation,
                   "module": module}]
             ))
-    return pd.concat(explanation_dfs, ignore_index=True)
+    
+    if explanation_dfs:
+        explanations_df = pd.concat(explanation_dfs, ignore_index=True)
+        explanations_df.to_csv(path / "explanations.csv", index=False)
+    else:
+        assert False, 'processing seemed to be done before'
+    # test whether the saved file is identical to original
+    explanations_js = load_explanations(path)
+    assert explanations_js.equals(explanations_df), "DataFrames are different"
+    # remove all the files in that directory
+    for file in path.glob(f"*{module}*"):
+        file.unlink()
+    return explanations_df
+
+def load_explanations(path: Path) -> pd.DataFrame:
+    """
+    Load explanations from a CSV file.
+    Args:
+        path (Path): The path to the CSV file.
+    Returns:
+        pd.DataFrame: A DataFrame containing the explanations.
+    """
+    path = path / "explanations.csv"
+    return pd.read_csv(path)
+
+def process_raw_scores(path: Path, modules: list) -> pd.DataFrame:
+    """
+    Load raw scores from a directory of files (one per latent), 
+    save them into a pd.DataFrame, and delete the files.
+    Args:
+        path (Path): The directory path where score files are stored.
+    Returns:
+        pd.DataFrame: A DataFrame containing the raw scores.
+    """
+    # Collect per-latent scores
+    scores_df, counts = load_data(path, modules)
+    if not scores_df.empty:
+        # save scores_df to disk (preserve the dtypes for loading)
+        dtypes = scores_df.dtypes.apply(lambda x: x.name).to_dict()
+        with open(path / "scores_dtypes.json", "w") as f:
+            json.dump(dtypes, f)
+        
+        scores_df.to_json(path / "scores.json", 
+                        index=False,
+                        orient="records",
+                        double_precision=15)
+    else:
+        assert False, 'processing seemed to be done before'
+    
+    # test whether the saved file is identical to original
+    scores_js = load_scores(path)
+    assert scores_js.equals(scores_df), "DataFrames are different"
+    # remove all the files in that directory
+    del counts  # not needed anymore
+    for score_type_dir in path.iterdir():
+        for module in modules:
+            for file in score_type_dir.glob(f"*{module}*"):
+                file.unlink()
+    return scores_df
+
+def load_scores(path: Path) -> pd.DataFrame:
+    """
+    Load scores from a JSON file.
+    Args:
+        path (Path): The path to the JSON file.
+    Returns:
+        pd.DataFrame: A DataFrame containing the scores.
+    """
+    f_path = path / "scores.json"
+    df = pd.read_json(f_path)
+    # load a json dict dtypes
+    with open(path / "scores_dtypes.json", "r") as f:
+        dtypes = json.load(f)
+    df = df.astype(dtypes)
+    return df
+def load_firing_counts(path: Path) -> pd.DataFrame:
+    """
+    Load firing counts from a JSON file.
+    Args:
+        path (Path): The path to the JSON file.
+    Returns:
+        pd.DataFrame: A DataFrame containing the firing counts.
+    """
+    f_path = path / "log" / "hookpoint_firing_counts.pt"
+    counts = torch.load(f_path, weights_only=True)
+    return counts 
+#^ 
 
 def _check_detection_non_activating(latent_df: pd.DataFrame) -> pd.DataFrame:
     """
